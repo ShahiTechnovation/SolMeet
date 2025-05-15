@@ -1,0 +1,14 @@
+{
+  "id": "7E9C7C87",
+  "name": "g",
+  "description": "fghj",
+  "venue": "vb",
+  "date": "2023-12-31T15:00:00",
+  "max_claims": 6,
+  "creator": "HAjUcPq4V1Q3yGskv13L59ooYt9vvAC5GTVUwJqfrazS",
+  "creator_id": 6904392242,
+  "claims": [],
+  "created_at": 1747300060,
+  "tx_signature": "helius_tx_createEvent_48020",
+  "is_onchain": true
+}

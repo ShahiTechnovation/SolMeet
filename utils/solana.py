@@ -399,29 +399,104 @@ async def create_event_onchain(
             
             # If program transaction fails, try direct memo transaction instead
             try:
-                # Create a memo transaction that stores the event data on-chain
-                # This is a simpler approach that doesn't require the program to work
-                memo_payload = {
+                # Create a proper Solana memo transaction that really goes on-chain
+                # Create the memo instruction directly with memo data
+                memo_data = base58.b58encode(event_json.encode()).decode('utf-8')
+                
+                memo_tx_payload = {
                     "jsonrpc": "2.0",
                     "id": random.randint(10000, 99999),
-                    "method": "sendTransaction",
-                    "params": [
-                        {
-                            "instructions": [
-                                {
-                                    "programId": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",  # Memo program
-                                    "data": base58.b58encode(event_json.encode()).decode('utf-8'),
-                                    "accounts": [
-                                        {"pubkey": creator_wallet, "isSigner": True, "isWritable": True}
-                                    ]
-                                }
-                            ],
-                            "signers": [creator_wallet]
-                        }
-                    ]
+                    "method": "getRecentBlockhash",
+                    "params": []
                 }
                 
-                # Send transaction to Helius
+                # First get a recent blockhash
+                logger.info("Getting recent blockhash for memo transaction...")
+                blockhash_response = requests.post(PRIMARY_RPC_URL, json=memo_tx_payload, timeout=10)
+                blockhash_data = blockhash_response.json()
+                
+                if "result" in blockhash_data and blockhash_data["result"]:
+                    recent_blockhash = blockhash_data["result"]["value"]["blockhash"]
+                    logger.info(f"Got recent blockhash: {recent_blockhash}")
+                    
+                    # Load wallet keypair for signing
+                    keypair = await load_wallet_keypair(creator_wallet)
+                    
+                    if keypair:
+                        logger.info(f"Loaded keypair for wallet {creator_wallet}")
+                        secret_key = keypair.get("secretKey") 
+                        
+                        # Now create and send the proper memo transaction
+                        memo_payload = {
+                            "jsonrpc": "2.0",
+                            "id": random.randint(10000, 99999),
+                            "method": "sendTransaction",
+                            "params": [
+                                {
+                                    "recentBlockhash": recent_blockhash,
+                                    "feePayer": creator_wallet,
+                                    "instructions": [
+                                        {
+                                            "programId": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
+                                            "keys": [],
+                                            "data": memo_data
+                                        }
+                                    ]
+                                },
+                                {
+                                    "encoding": "base64",
+                                    "skipPreflight": False
+                                }
+                            ]
+                        }
+                    else:
+                        logger.warning(f"Could not load keypair for wallet {creator_wallet}")
+                        # Fallback to simplified memo format
+                        memo_payload = {
+                            "jsonrpc": "2.0",
+                            "id": random.randint(10000, 99999),
+                            "method": "sendTransaction",
+                            "params": [
+                                {
+                                    "recentBlockhash": recent_blockhash,
+                                    "instructions": [
+                                        {
+                                            "programId": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr", 
+                                            "data": memo_data,
+                                            "accounts": [
+                                                {"pubkey": creator_wallet, "isSigner": True, "isWritable": True}
+                                            ]
+                                        }
+                                    ],
+                                    "signers": [creator_wallet]
+                                }
+                            ]
+                        }
+                else:
+                    logger.error("Failed to get recent blockhash, using fallback approach")
+                    # Fallback to simplified memo format without blockhash
+                    memo_payload = {
+                        "jsonrpc": "2.0",
+                        "id": random.randint(10000, 99999),
+                        "method": "sendTransaction",
+                        "params": [
+                            {
+                                "instructions": [
+                                    {
+                                        "programId": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
+                                        "data": memo_data,
+                                        "accounts": [
+                                            {"pubkey": creator_wallet, "isSigner": True, "isWritable": True}
+                                        ]
+                                    }
+                                ],
+                                "signers": [creator_wallet]
+                            }
+                        ]
+                    }
+                
+                # Send the memo transaction
+                logger.info("Sending memo transaction to Helius...")
                 response = requests.post(PRIMARY_RPC_URL, json=memo_payload, timeout=10)
                 data = response.json()
                 
@@ -538,29 +613,104 @@ async def join_event_onchain(
             
             # If program transaction fails, try direct memo transaction instead
             try:
-                # Create a memo transaction that stores the join data on-chain
-                # This is a simpler approach that doesn't require the program to work
-                memo_payload = {
+                # Create a proper Solana memo transaction that really goes on-chain
+                # Create the memo instruction directly with memo data
+                memo_data = base58.b58encode(join_json.encode()).decode('utf-8')
+                
+                memo_tx_payload = {
                     "jsonrpc": "2.0",
                     "id": random.randint(10000, 99999),
-                    "method": "sendTransaction",
-                    "params": [
-                        {
-                            "instructions": [
-                                {
-                                    "programId": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",  # Memo program
-                                    "data": base58.b58encode(join_json.encode()).decode('utf-8'),
-                                    "accounts": [
-                                        {"pubkey": attendee_wallet, "isSigner": True, "isWritable": True}
-                                    ]
-                                }
-                            ],
-                            "signers": [attendee_wallet]
-                        }
-                    ]
+                    "method": "getRecentBlockhash",
+                    "params": []
                 }
                 
-                # Send transaction to Helius
+                # First get a recent blockhash
+                logger.info("Getting recent blockhash for join memo transaction...")
+                blockhash_response = requests.post(PRIMARY_RPC_URL, json=memo_tx_payload, timeout=10)
+                blockhash_data = blockhash_response.json()
+                
+                if "result" in blockhash_data and blockhash_data["result"]:
+                    recent_blockhash = blockhash_data["result"]["value"]["blockhash"]
+                    logger.info(f"Got recent blockhash for join: {recent_blockhash}")
+                    
+                    # Load wallet keypair for signing
+                    keypair = await load_wallet_keypair(attendee_wallet)
+                    
+                    if keypair:
+                        logger.info(f"Loaded keypair for wallet {attendee_wallet}")
+                        secret_key = keypair.get("secretKey") 
+                        
+                        # Now create and send the proper memo transaction
+                        memo_payload = {
+                            "jsonrpc": "2.0",
+                            "id": random.randint(10000, 99999),
+                            "method": "sendTransaction",
+                            "params": [
+                                {
+                                    "recentBlockhash": recent_blockhash,
+                                    "feePayer": attendee_wallet,
+                                    "instructions": [
+                                        {
+                                            "programId": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
+                                            "keys": [],
+                                            "data": memo_data
+                                        }
+                                    ]
+                                },
+                                {
+                                    "encoding": "base64",
+                                    "skipPreflight": False
+                                }
+                            ]
+                        }
+                    else:
+                        logger.warning(f"Could not load keypair for wallet {attendee_wallet}")
+                        # Fallback to simplified memo format
+                        memo_payload = {
+                            "jsonrpc": "2.0",
+                            "id": random.randint(10000, 99999),
+                            "method": "sendTransaction",
+                            "params": [
+                                {
+                                    "recentBlockhash": recent_blockhash,
+                                    "instructions": [
+                                        {
+                                            "programId": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr", 
+                                            "data": memo_data,
+                                            "accounts": [
+                                                {"pubkey": attendee_wallet, "isSigner": True, "isWritable": True}
+                                            ]
+                                        }
+                                    ],
+                                    "signers": [attendee_wallet]
+                                }
+                            ]
+                        }
+                else:
+                    logger.error("Failed to get recent blockhash for join, using fallback approach")
+                    # Fallback to simplified memo format without blockhash
+                    memo_payload = {
+                        "jsonrpc": "2.0",
+                        "id": random.randint(10000, 99999),
+                        "method": "sendTransaction",
+                        "params": [
+                            {
+                                "instructions": [
+                                    {
+                                        "programId": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
+                                        "data": memo_data,
+                                        "accounts": [
+                                            {"pubkey": attendee_wallet, "isSigner": True, "isWritable": True}
+                                        ]
+                                    }
+                                ],
+                                "signers": [attendee_wallet]
+                            }
+                        ]
+                    }
+                
+                # Send the memo transaction
+                logger.info("Sending join memo transaction to Helius...")
                 response = requests.post(PRIMARY_RPC_URL, json=memo_payload, timeout=10)
                 data = response.json()
                 

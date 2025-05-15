@@ -253,29 +253,36 @@ async def approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     parts = callback_data.split('_')
     action = parts[0]
     
+    # Pass context explicitly to handle_approval
     if action == "approve" and len(parts) >= 3:
         event_id = parts[1]
         wallet_address = '_'.join(parts[2:])  # In case wallet contains underscores
-        await handle_approval(query, user_id, event_id, wallet_address, approved=True)
+        await handle_approval(query, user_id, event_id, wallet_address, approved=True, context=context)
     elif action == "decline" and len(parts) >= 3:
         event_id = parts[1]
         wallet_address = '_'.join(parts[2:])  # In case wallet contains underscores
-        await handle_approval(query, user_id, event_id, wallet_address, approved=False)
+        await handle_approval(query, user_id, event_id, wallet_address, approved=False, context=context)
     elif action == "requests" and len(parts) >= 2:
         event_id = parts[1]
-        await handle_requests_list(query, user_id, event_id)
+        await handle_requests_list(query, user_id, event_id, context=context)
     else:
         logger.error(f"Unknown approval action: {action}")
-        await query.edit_message_text(
-            "❌ There was an error processing your request. Please try again."
-        )
+        try:
+            await query.edit_message_text(
+                "❌ There was an error processing your request. Please try again."
+            )
+        except Exception as edit_err:
+            logger.error(f"Failed to edit message: {edit_err}")
+            # Try answering callback query with error text
+            await query.answer("Error processing request. Please try again.")
 
 async def handle_approval(
     query,
     user_id: int,
     event_id: str,
     wallet_address: str,
-    approved: bool
+    approved: bool,
+    context: ContextTypes.DEFAULT_TYPE
 ) -> None:
     """
     Handle the approval or decline of a join request.
@@ -286,9 +293,16 @@ async def handle_approval(
         event_id: The event ID
         wallet_address: The wallet address of the requester
         approved: Whether the request was approved
+        context: The context object passed from the callback handler
     """
-    # Get the context from the query
-    context = query._context
+    # Use the passed context instead of getting it from query
+    if not context:
+        logger.error("No context provided to handle_approval")
+        try:
+            await query.answer("An error occurred. Please try again.")
+            return
+        except Exception:
+            return
     try:
         # Check if the user is the event organizer
         organizer_id = get_event_organizer_id(event_id)
@@ -450,7 +464,8 @@ async def handle_approval(
 async def handle_requests_list(
     query,
     user_id: int,
-    event_id: str
+    event_id: str,
+    context: ContextTypes.DEFAULT_TYPE
 ) -> None:
     """
     Handle showing the list of join requests for an event.
@@ -459,9 +474,16 @@ async def handle_requests_list(
         query: The callback query
         user_id: The user ID of the requester
         event_id: The event ID
+        context: The context object passed from the callback handler
     """
-    # Get the context from the query
-    context = query._context
+    # Use the passed context instead of trying to get it from query
+    if not context:
+        logger.error("No context provided to handle_requests_list")
+        try:
+            await query.answer("An error occurred. Please try again.")
+            return
+        except Exception:
+            return
     try:
         # Check if the user is the event organizer
         organizer_id = get_event_organizer_id(event_id)
