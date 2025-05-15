@@ -1,0 +1,14 @@
+{
+  "id": "29E7219D",
+  "name": "wefn",
+  "description": "qqwerfgh",
+  "venue": "qwerg",
+  "date": 1704034800,
+  "max_claims": 2,
+  "creator": "3PPUEaBXsuqTFL4BTWwcCrpdGXhd7oL2eeah6TcxCQYd",
+  "claims": [
+    "CrkzQfs3b3a89HLnBNRyunuBzMqKSrQT7ZquoPdScDTa"
+  ],
+  "created_at": 1747293878,
+  "tx_signature": "create_29E7219D_be0d4c5d15a354a3"
+}

@@ -18,7 +18,8 @@ from telegram.ext import (
 )
 
 # Import handlers
-from handlers.start import start_command, about_command, start_callback
+from handlers.start import start_command, about_command, start_callback, settings_command
+from handlers.approval import approval_callback
 from handlers.wallet import (
     connect_wallet_command,
     wallet_info_command,
@@ -78,6 +79,7 @@ def main() -> None:
         BotCommand("send_join", "Join an existing event"),
         BotCommand("my_events", "View your created and joined events"),
         BotCommand("faucet", "Get SOL tokens for testing on Devnet"),
+        BotCommand("settings", "Configure your app and wallet settings"),
     ]
     
     # Register command handlers
@@ -90,12 +92,15 @@ def main() -> None:
     application.add_handler(CommandHandler("send_join", join_event_command))
     application.add_handler(CommandHandler("my_events", my_events_command))
     application.add_handler(CommandHandler("faucet", faucet_command))
+    application.add_handler(CommandHandler("settings", settings_command))
 
     # Register callback query handlers
     application.add_handler(CallbackQueryHandler(wallet_callback, pattern=r"^wallet_"))
     application.add_handler(CallbackQueryHandler(event_callback, pattern=r"^event_"))
     application.add_handler(CallbackQueryHandler(start_callback, pattern=r"^start$"))
     application.add_handler(CallbackQueryHandler(about_command, pattern=r"^about$"))
+    application.add_handler(CallbackQueryHandler(settings_command, pattern=r"^app_"))
+    application.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^(approve|decline|requests)_"))
 
     # Register message handlers for event flows
     application.add_handler(MessageHandler(

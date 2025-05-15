@@ -560,79 +560,63 @@ async def process_event_join(
 ) -> None:
     """
     Process the joining of an event after receiving the event ID.
+    Now uses the approval system instead of direct joining.
     """
     try:
+        # Import here to avoid circular imports
+        from handlers.approval import send_join_request
+        
         # Send a processing message
-        processing_message = await update.message.reply_text(
-            f"Processing your request to join event {event_id}..."
-        )
+        if update.message:
+            processing_message = await update.message.reply_text(
+                f"Processing your request to join event {event_id}..."
+            )
         
-        # Join the event on-chain
-        tx_signature = await join_event_onchain(user_wallet, event_id)
-        
-        # Add the user to the event participants
-        username = update.effective_user.username
-        first_name = update.effective_user.first_name
-        last_name = update.effective_user.last_name
-        
-        success = add_event_participant(
-            event_id, user_wallet, user_id, username, first_name, last_name
-        )
-        
-        if success:
-            # Get the current participant count
-            participant_count = count_event_participants(event_id)
+        # Get user information
+        if update.effective_user:
+            username = update.effective_user.username
+            first_name = update.effective_user.first_name
+            last_name = update.effective_user.last_name
             
-            # Generate QR code for the event
-            qr_image_path = generate_join_qr(event_id)
-            
-            # Send success message to the user
-            success_text = (
-                f"🎉 *Successfully Joined Event!*\n\n"
-                f"*Event ID:* `{event_id}`\n"
-                f"You are participant #{participant_count}\n\n"
-                f"[View Transaction on Explorer](https://explorer.solana.com/tx/{tx_signature}?cluster=devnet)"
+            # Send join request instead of directly joining
+            await send_join_request(
+                update=update,
+                context=context,
+                event_id=event_id,
+                user_id=user_id,
+                user_wallet=user_wallet,
+                username=username,
+                first_name=first_name,
+                last_name=last_name
             )
             
-            keyboard = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("View My Events", callback_data="event_list_mine"),
-                    InlineKeyboardButton("Join Another", callback_data="event_join")
-                ],
-                [InlineKeyboardButton("Back to Menu", callback_data="start")]
-            ])
-            
-            await processing_message.edit_text(
-                success_text,
-                parse_mode="Markdown",
-                reply_markup=keyboard,
-                disable_web_page_preview=True
-            )
-            
-            # Send the event QR code if available
-            if qr_image_path and os.path.exists(qr_image_path):
-                with open(qr_image_path, 'rb') as photo:
-                    await context.bot.send_photo(
-                        chat_id=update.message.chat_id,
-                        photo=photo,
-                        caption=f"You've joined event: {event_id}. Share this QR with others!"
-                    )
-            
-            # Send notifications to event subscribers
-            await notify_event_subscribers(context, event_id, user_id, user_wallet, username, first_name, last_name)
-            
+            # Update the processing message if it exists
+            if update.message and 'processing_message' in locals():
+                await processing_message.edit_text(
+                    f"Your request to join event {event_id} has been sent to the organizer.\n\n"
+                    "You will be notified when your request is approved or declined.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Back to Menu", callback_data="start")]
+                    ])
+                )
         else:
-            await processing_message.edit_text(
-                f"There was an issue joining event {event_id}. Please try again.",
-                reply_markup=get_main_keyboard()
-            )
+            logger.error("No effective user in update for process_event_join")
+            if update.message:
+                await update.message.reply_text(
+                    "❌ There was an error processing your request. Please try again later.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Try Again", callback_data="event_join")],
+                        [InlineKeyboardButton("Back to Menu", callback_data="start")]
+                    ])
+                )
             
     except Exception as e:
-        logger.error(f"Error joining event: {e}")
-        await update.message.reply_text(
-            f"Error joining event: {str(e)}",
-            reply_markup=get_main_keyboard()
-        )
+        logger.error(f"Error processing join request: {e}")
+        if update.message:
+            await update.message.reply_text(
+                f"Error processing join request: {str(e)}",
+                reply_markup=get_main_keyboard()
+            )
 
 
 async def notify_event_subscribers(
