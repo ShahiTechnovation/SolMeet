@@ -1,0 +1,14 @@
+{
+  "id": "C3F98DED",
+  "name": "AWET",
+  "description": "wer",
+  "venue": "QWERTYUI",
+  "date": "2023-12-31T15:00:00",
+  "max_claims": 345,
+  "creator": "HAjUcPq4V1Q3yGskv13L59ooYt9vvAC5GTVUwJqfrazS",
+  "creator_id": 6904392242,
+  "claims": [],
+  "created_at": 1747299741,
+  "tx_signature": "helius_tx_createEvent_40632",
+  "is_onchain": true
+}
