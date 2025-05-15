@@ -11,6 +11,9 @@ from typing import Optional
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputFile
 from telegram.ext import ContextTypes, ConversationHandler
 
+# Set up logger
+logger = logging.getLogger(__name__)
+
 from utils.here_wallet import get_wallet_by_user_id
 from utils.solana import create_event_onchain, join_event_onchain, get_user_events
 from utils.qr import generate_event_qr, generate_join_qr
@@ -216,6 +219,81 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return ConversationHandler.END
 
 
+# Define the handle_my_events function at module level
+async def handle_my_events(query, user_id: int, user_wallet: str) -> None:
+    """Handler for displaying user's events from a callback."""
+    try:
+        # Get the user's events
+        events = await get_user_events(user_wallet)
+        
+        created_events = events.get("created", [])
+        joined_events = events.get("joined", [])
+        
+        if not created_events and not joined_events:
+            await query.edit_message_text(
+                "You haven't created or joined any events yet.\n\n"
+                "Use the buttons below to create a new event or join an existing one.",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("Create Event", callback_data="event_create"),
+                        InlineKeyboardButton("Join Event", callback_data="event_join")
+                    ],
+                    [InlineKeyboardButton("Back to Menu", callback_data="start")]
+                ])
+            )
+            return
+        
+        # Format the events list
+        if created_events:
+            created_events_text = "*Events You Created:*\n\n"
+            for i, event in enumerate(created_events):
+                claims_text = f"{event.get('claims_count', 0)}/{event.get('max_claims', 'unlimited')}"
+                created_events_text += (
+                    f"{i+1}. *{event.get('name', 'Unnamed Event')}*\n"
+                    f"   ID: `{event.get('id', 'unknown')}`\n"
+                    f"   Date: {event.get('date', 'Not specified')}\n"
+                    f"   Venue: {event.get('venue', 'Not specified')}\n"
+                    f"   Participants: {claims_text}\n\n"
+                )
+        else:
+            created_events_text = "*Events You Created:* None\n\n"
+            
+        if joined_events:
+            joined_events_text = "*Events You Joined:*\n\n"
+            for i, event in enumerate(joined_events):
+                joined_events_text += (
+                    f"{i+1}. *{event.get('name', 'Unnamed Event')}*\n"
+                    f"   Creator: {event.get('creator', 'unknown')}\n"
+                    f"   Date: {event.get('date', 'Not specified')}\n"
+                    f"   Venue: {event.get('venue', 'Not specified')}\n\n"
+                )
+        else:
+            joined_events_text = "*Events You Joined:* None\n\n"
+            
+        # Combine the texts
+        events_text = created_events_text + joined_events_text
+        
+        await query.edit_message_text(
+            events_text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("Create Event", callback_data="event_create"),
+                    InlineKeyboardButton("Join Event", callback_data="event_join")
+                ],
+                [InlineKeyboardButton("Back to Menu", callback_data="start")]
+            ])
+        )
+    except Exception as e:
+        logger.error(f"Error fetching events: {e}")
+        await query.edit_message_text(
+            "Error fetching your events. Please try again later.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Back to Menu", callback_data="start")]
+            ])
+        )
+
+
 async def event_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     Handle event-related callback queries.
@@ -223,16 +301,102 @@ async def event_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     query = update.callback_query
     await query.answer()
     
-    action = query.data.split("_")[1]
+    if not query.data or "_" not in query.data:
+        logger.warning(f"Invalid callback data: {query.data}")
+        return ConversationHandler.END
+        
+    parts = query.data.split("_")
+    if len(parts) < 2:
+        logger.warning(f"Malformed callback data: {query.data}")
+        return ConversationHandler.END
+        
+    action = parts[1]
     
+    # Security check - make sure the user has a wallet
+    user_id = query.from_user.id
+    user_wallet = get_wallet_by_user_id(user_id)
+    
+    if action in ["create", "join", "my"] and not user_wallet:
+        await query.edit_message_text(
+            "You need to connect a wallet first to use this feature.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Connect Wallet", callback_data="wallet_connect")],
+                [InlineKeyboardButton("Back to Menu", callback_data="start")]
+            ])
+        )
+        return ConversationHandler.END
+    
+    # Handle event creation
     if action == "create":
-        return await create_event_command(update, context)
+        # Prepare event creation flow
+        # Initialize event data structure
+        context.user_data["create_event"] = {
+            "event_id": str(uuid.uuid4())[:8].upper(),  # Short unique ID
+            "creator_wallet": user_wallet,
+            "step": "name",  # Start with event name
+        }
+        
+        await query.edit_message_text(
+            "*Create a New Event*\n\n"
+            "Let's set up your event on Solana.\n\n"
+            "First, what's the *name* of your event?",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Cancel", callback_data="start")]
+            ])
+        )
+        return 1  # State for handling the event name
     
+    # Handle event joining
     elif action == "join":
-        return await join_event_command(update, context)
+        # Prompt for event code
+        context.user_data["join_event"] = {
+            "user_wallet": user_wallet,
+            "user_id": user_id
+        }
+        
+        await query.edit_message_text(
+            "*Join an Event*\n\n"
+            "Please enter the event code you'd like to join.\n"
+            "This is a short alphanumeric code like 'ABC123'.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Cancel", callback_data="start")]
+            ])
+        )
+        return 2  # State for handling the event code
     
+    # Handle My Events
+    elif action == "my":
+        await handle_my_events(query, user_id, user_wallet)
+        return ConversationHandler.END
+    
+    # Handle event info
+    elif action == "info":
+        await query.edit_message_text(
+            "*What is SolMeet?*\n\n"
+            "SolMeet is a platform for creating and joining Web3 events on Solana.\n\n"
+            "With SolMeet, you can:\n"
+            "• Create events that are recorded on the Solana blockchain\n"
+            "• Join events and get verified on-chain\n"
+            "• Track your participation in various events\n"
+            "• Share events via QR codes and links\n\n"
+            "To get started, connect a wallet with the button below.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Connect Wallet", callback_data="wallet_connect")],
+                [InlineKeyboardButton("Back to Menu", callback_data="start")]
+            ])
+        )
+        return ConversationHandler.END
+    
+    # Handle event confirmation
     elif action == "confirm":
-        sub_action = query.data.split("_")[2]
+        if len(parts) < 3:
+            logger.warning(f"Malformed confirmation data: {query.data}")
+            return ConversationHandler.END
+            
+        sub_action = parts[2]
         
         if sub_action == "create" and "create_event" in context.user_data:
             event_data = context.user_data["create_event"]

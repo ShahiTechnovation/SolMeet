@@ -166,6 +166,129 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 "Your recovery phrase is very important - save it somewhere safe!",
                 parse_mode="Markdown"
             )
+        elif action == "settings":
+            user_wallet = get_wallet_by_user_id(user_id)
+            
+            if not user_wallet:
+                # User doesn't have a wallet yet
+                await query.message.reply_text(
+                    "You need to connect a wallet first before accessing settings.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Connect Wallet", callback_data="wallet_connect")],
+                        [InlineKeyboardButton("Back to Menu", callback_data="start")]
+                    ])
+                )
+                return
+                
+            settings_text = (
+                "*Wallet Settings*\n\n"
+                "Here you can manage your wallet settings and preferences:\n\n"
+                "• View your wallet recovery phrase (seed)\n"
+                "• Request SOL from the Devnet faucet\n"
+                "• Export wallet keyfile\n"
+                "• Set notification preferences"
+            )
+            
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("Show Recovery Phrase", callback_data="wallet_seed"),
+                    InlineKeyboardButton("Request SOL", callback_data="wallet_faucet")
+                ],
+                [
+                    InlineKeyboardButton("Export Wallet", callback_data="wallet_export"),
+                    InlineKeyboardButton("Notifications", callback_data="wallet_notifications")
+                ],
+                [InlineKeyboardButton("Back to Menu", callback_data="start")]
+            ])
+            
+            await query.edit_message_text(
+                settings_text,
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+        elif action == "seed":
+            user_wallet = get_wallet_by_user_id(user_id)
+            if not user_wallet:
+                await query.message.reply_text(
+                    "You don't have a wallet connected.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Connect Wallet", callback_data="wallet_connect")]
+                    ])
+                )
+                return
+                
+            wallet_info = get_wallet_info(user_wallet)
+            if not wallet_info:
+                await query.message.reply_text("Could not retrieve wallet details.")
+                return
+                
+            mnemonic = wallet_info.get("mnemonic", "Not available")
+            
+            await query.message.reply_text(
+                "*Your Recovery Phrase (SEED)*\n\n"
+                f"`{mnemonic}`\n\n"
+                "⚠️ *WARNING*: Never share this with anyone!\n"
+                "This phrase gives complete access to your wallet.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("Back to Settings", callback_data="wallet_settings")],
+                    [InlineKeyboardButton("Back to Menu", callback_data="start")]
+                ])
+            )
+        elif action == "export":
+            user_wallet = get_wallet_by_user_id(user_id)
+            if not user_wallet:
+                await query.message.reply_text("You don't have a wallet connected.")
+                return
+                
+            wallet_info = get_wallet_info(user_wallet)
+            if not wallet_info:
+                await query.message.reply_text("Could not retrieve wallet details.")
+                return
+                
+            private_key = wallet_info.get("private_key", "Not available")
+            
+            await query.message.reply_text(
+                "*Your Private Key*\n\n"
+                f"`{private_key}`\n\n"
+                "You can use this private key to import your wallet into other Solana wallets.\n"
+                "⚠️ *WARNING*: Never share this with anyone!\n"
+                "This key gives complete access to your wallet.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("Back to Settings", callback_data="wallet_settings")],
+                    [InlineKeyboardButton("Back to Menu", callback_data="start")]
+                ])
+            )
+        elif action == "notifications":
+            # Simple notifications preferences
+            notification_text = (
+                "*Notification Settings*\n\n"
+                "Choose which notifications you want to receive:\n\n"
+                "• Event creation confirmations\n"
+                "• New event participants\n"
+                "• Faucet request confirmations\n"
+                "• Transaction confirmations"
+            )
+            
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("Enable All", callback_data="wallet_notify_enable_all"),
+                    InlineKeyboardButton("Disable All", callback_data="wallet_notify_disable_all")
+                ],
+                [
+                    InlineKeyboardButton("Event Updates Only", callback_data="wallet_notify_events"),
+                    InlineKeyboardButton("Transactions Only", callback_data="wallet_notify_transactions")
+                ],
+                [InlineKeyboardButton("Back to Settings", callback_data="wallet_settings")],
+                [InlineKeyboardButton("Back to Menu", callback_data="start")]
+            ])
+            
+            await query.edit_message_text(
+                notification_text,
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
         else:
             logger.warning(f"Unknown wallet action: {action}")
     except Exception as e:

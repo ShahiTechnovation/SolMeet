@@ -18,7 +18,7 @@ from telegram.ext import (
 )
 
 # Import handlers
-from handlers.start import start_command, about_command
+from handlers.start import start_command, about_command, start_callback
 from handlers.wallet import (
     connect_wallet_command,
     wallet_info_command,
@@ -94,6 +94,8 @@ def main() -> None:
     # Register callback query handlers
     application.add_handler(CallbackQueryHandler(wallet_callback, pattern=r"^wallet_"))
     application.add_handler(CallbackQueryHandler(event_callback, pattern=r"^event_"))
+    application.add_handler(CallbackQueryHandler(start_callback, pattern=r"^start$"))
+    application.add_handler(CallbackQueryHandler(about_command, pattern=r"^about$"))
 
     # Register message handlers for event flows
     application.add_handler(MessageHandler(
