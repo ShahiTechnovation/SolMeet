@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-declare_id!("SoLMEETsmMaJrjDnqL8ERjV5TuTXYpUz1XoAZzZ2BG");
+declare_id!("Gx3muwmBzRr8DVvyPdW46PNbT815TGcVqSf7q1WUeHwj");
 
 #[program]
 pub mod solmeet {

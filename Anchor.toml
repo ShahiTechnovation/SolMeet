@@ -1,7 +1,7 @@
 [features]
 seeds = false
 [programs.devnet]
-solmeet = "SoLMEETsmMaJrjDnqL8ERjV5TuTXYpUz1XoAZzZ2BG"
+solmeet = "Gx3muwmBzRr8DVvyPdW46PNbT815TGcVqSf7q1WUeHwj"
 
 [registry]
 url = "https://api.apr.dev"
