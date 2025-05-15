@@ -136,4 +136,4 @@ Pull requests, ideas, and forks are welcome. If you’re a designer, dev, or blo
 
 ---
 
-> _“Events bring people together. SolMeet makes them verifiable, trustless, and fun.”_
+> _“Events bring people together. SolMeet makes them verifiable, Secure, and fun.”_
