@@ -10,6 +10,7 @@ from telegram.ext import ContextTypes
 
 from utils.keyboard import get_main_keyboard
 from utils.here_wallet import get_wallet_by_user_id
+from utils import safe_message_reply, safe_edit_message_text, safe_answer
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     ])
 
     try:
-        await update.message.reply_text(
+        await safe_message_reply(
+            update.message,
             text=welcome_text,
             reply_markup=keyboard
         )
@@ -63,7 +65,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.error(f"Error in start command: {e}")
         # Extra-simple fallback with minimal text
         try:
-            await update.message.reply_text(
+            await safe_message_reply(
+                update.message,
                 "Welcome to SolMeet! Use the buttons below to navigate.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("Connect Wallet", callback_data="wallet_connect")],
@@ -99,13 +102,15 @@ async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     try:
         if update.callback_query:
             query = update.callback_query
-            await query.answer()
-            await query.edit_message_text(
+            await safe_answer(query, "")
+            await safe_edit_message_text(
+                query,
                 text=about_text,
                 reply_markup=get_main_keyboard()
             )
         elif update.message:
-            await update.message.reply_text(
+            await safe_message_reply(
+                update.message,
                 text=about_text,
                 reply_markup=get_main_keyboard()
             )
@@ -114,7 +119,8 @@ async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         # Simple fallback message
         if update.callback_query:
             try:
-                await update.callback_query.edit_message_text(
+                await safe_edit_message_text(
+                    update.callback_query,
                     text="SolMeet is a Web3 Event Manager on Solana. Use the buttons below to navigate.",
                     reply_markup=get_main_keyboard()
                 )
@@ -122,7 +128,8 @@ async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 pass
         elif update.message:
             try:
-                await update.message.reply_text(
+                await safe_message_reply(
+                    update.message,
                     text="SolMeet is a Web3 Event Manager on Solana. Use the buttons below to navigate.",
                     reply_markup=get_main_keyboard()
                 )
@@ -141,7 +148,7 @@ async def start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     query = update.callback_query
     
     try:
-        await query.answer()
+        await safe_answer(query, "")
         
         user = query.from_user
         if not user:
@@ -184,7 +191,8 @@ async def start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 ]
             ])
 
-        await query.edit_message_text(
+        await safe_edit_message_text(
+            query,
             text=welcome_text,
             reply_markup=keyboard
         )
@@ -198,8 +206,9 @@ async def start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     InlineKeyboardButton("About", callback_data="about")
                 ]
             ])
-            await query.edit_message_text(
-                "Welcome to SolMeet! Use the buttons below to navigate.",
+            await safe_edit_message_text(
+                query,
+                text="Welcome to SolMeet! Use the buttons below to navigate.",
                 reply_markup=keyboard
             )
         except Exception as e2:
@@ -258,28 +267,32 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if not user_wallet:
             wallet_message = "You need to connect a wallet first before accessing settings."
             if is_callback:
-                await update.callback_query.answer()
-                await update.callback_query.edit_message_text(
-                    wallet_message,
+                await safe_answer(update.callback_query, "")
+                await safe_edit_message_text(
+                    update.callback_query,
+                    text=wallet_message,
                     reply_markup=no_wallet_keyboard
                 )
             elif update.message:
-                await update.message.reply_text(
-                    wallet_message,
+                await safe_message_reply(
+                    update.message,
+                    text=wallet_message,
                     reply_markup=no_wallet_keyboard
                 )
             return
             
         # If we got here, user has a wallet
         if is_callback:
-            await update.callback_query.answer()
-            await update.callback_query.edit_message_text(
-                settings_text,
+            await safe_answer(update.callback_query, "")
+            await safe_edit_message_text(
+                update.callback_query,
+                text=settings_text,
                 reply_markup=keyboard
             )
         elif update.message:
-            await update.message.reply_text(
-                settings_text,
+            await safe_message_reply(
+                update.message,
+                text=settings_text,
                 reply_markup=keyboard
             )
     except Exception as e:
@@ -287,16 +300,18 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Fallback messaging
         if is_callback and update.callback_query:
             try:
-                await update.callback_query.edit_message_text(
-                    "Settings menu. Use the buttons below to navigate.",
+                await safe_edit_message_text(
+                    update.callback_query,
+                    text="Settings menu. Use the buttons below to navigate.",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back to Menu", callback_data="start")]])
                 )
             except Exception:
                 pass
         elif update.message:
             try:
-                await update.message.reply_text(
-                    "Settings menu. Use the buttons below to navigate.",
+                await safe_message_reply(
+                    update.message,
+                    text="Settings menu. Use the buttons below to navigate.",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back to Menu", callback_data="start")]])
                 )
             except Exception:

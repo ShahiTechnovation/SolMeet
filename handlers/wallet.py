@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, Tuple
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
+from telegram._message import Message
 
 from utils.here_wallet import (
     generate_connect_url,
@@ -19,6 +20,13 @@ from utils.here_wallet import (
 from utils.wallet_creator import get_wallet_info
 from utils.solana import get_sol_balance, format_wallet_address
 from utils.qr import generate_wallet_qr
+from utils import (
+    safe_message_reply, 
+    safe_photo_reply, 
+    safe_edit_message_text, 
+    safe_answer,
+    safe_get_chat_id
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +47,8 @@ async def connect_wallet_command(update: Update, context: ContextTypes.DEFAULT_T
     # Check if they already have a wallet
     existing_wallet = get_wallet_by_user_id(user_id)
     if existing_wallet:
-        await update.message.reply_text(
+        await safe_message_reply(
+            update.message,
             f"You already have a connected wallet: `{format_wallet_address(existing_wallet)}`\n\n"
             "What would you like to do with your wallet?",
             parse_mode="Markdown",
@@ -50,7 +59,8 @@ async def connect_wallet_command(update: Update, context: ContextTypes.DEFAULT_T
     # New user without a wallet
     connect_url = generate_connect_url(user_id)
     
-    await update.message.reply_text(
+    await safe_message_reply(
+        update.message,
         "Let's connect your wallet to SolMeet!\n\n"
         "You have two options:\n"
         "1️⃣ Create a new Solana wallet directly in the bot (recommended for beginners)\n"
@@ -80,7 +90,8 @@ async def wallet_info_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_wallet = get_wallet_by_user_id(user_id)
     
     if not user_wallet:
-        await update.message.reply_text(
+        await safe_message_reply(
+            update.message,
             "You don't have a wallet connected yet. Would you like to create one?",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Connect Wallet", callback_data="wallet_connect")],
@@ -100,14 +111,16 @@ async def wallet_info_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             "This is a Solana wallet on Devnet, meant for testing and development."
         )
         
-        await update.message.reply_text(
+        await safe_message_reply(
+            update.message,
             info_text,
             parse_mode="Markdown",
             reply_markup=get_wallet_actions_keyboard(user_wallet)
         )
     except Exception as e:
         logger.error(f"Error fetching wallet info: {e}")
-        await update.message.reply_text(
+        await safe_message_reply(
+            update.message,
             "There was an error fetching your wallet information. Please try again later.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Back to Menu", callback_data="start")]
@@ -171,7 +184,8 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     logger.error("No message in callback query for wallet_list")
                     return
                 
-                await query.message.reply_text(
+                await safe_message_reply(
+                    query.message,
                     "No wallets are currently available to claim. Try creating a new wallet.",
                     reply_markup=InlineKeyboardMarkup([
                         [InlineKeyboardButton("Create New Wallet", callback_data="wallet_create")],
@@ -203,7 +217,8 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     logger.error("No message in callback query for wallet_select")
                     return
                 
-                await query.message.reply_text(
+                await safe_message_reply(
+                    query.message,
                     f"Successfully connected wallet: `{format_wallet_address(wallet_address)}`\n\n"
                     "You can now create and join events with this wallet.",
                     parse_mode="Markdown",
@@ -214,7 +229,8 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     logger.error("No message in callback query for wallet_select")
                     return
                 
-                await query.message.reply_text(
+                await safe_message_reply(
+                    query.message,
                     "There was an error connecting this wallet. Please try again.",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Try Again", callback_data="wallet_connect")]])
                 )
@@ -227,7 +243,10 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     logger.error("No message in callback query for wallet_info")
                     return
                 
-                await query.message.reply_text("You don't have a wallet connected.")
+                await safe_message_reply(
+                    query.message,
+                    "You don't have a wallet connected."
+                )
                 return
             
             try:
@@ -241,7 +260,8 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     "This is a Solana wallet on Devnet, meant for testing and development."
                 )
                 
-                await query.edit_message_text(
+                await safe_edit_message_text(
+                    query,
                     info_text,
                     parse_mode="Markdown",
                     reply_markup=get_wallet_actions_keyboard(user_wallet)
@@ -252,7 +272,8 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     logger.error("No message in callback query when handling error")
                     return
                 
-                await query.message.reply_text(
+                await safe_message_reply(
+                    query.message,
                     "There was an error fetching your wallet information. Please try again later.",
                     reply_markup=InlineKeyboardMarkup([
                         [InlineKeyboardButton("Back to Menu", callback_data="start")]
@@ -266,7 +287,7 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     logger.error("No message in callback query for wallet_qr")
                     return
                     
-                await query.message.reply_text("You don't have a wallet connected.")
+                await safe_message_reply(query.message, "You don't have a wallet connected.")
                 return
                 
             qr_path = generate_wallet_qr(user_wallet)
@@ -275,15 +296,16 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     logger.error("No message in callback query for wallet_qr")
                     return
                     
-                await query.message.reply_text("Could not generate QR code. Please try again.")
+                await safe_message_reply(query.message, "Could not generate QR code. Please try again.")
                 return
                 
             if not query.message:
                 logger.error("No message in callback query for wallet_qr")
                 return
                 
-            await query.message.reply_photo(
-                open(qr_path, "rb"),
+            await safe_photo_reply(
+                query.message,
+                photo=open(qr_path, "rb"),
                 caption=f"QR Code for wallet: `{format_wallet_address(user_wallet)}`\n\n"
                 "Scan this QR code to see your wallet address.",
                 parse_mode="Markdown",
@@ -326,7 +348,7 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     logger.error("No message in callback query for wallet_seed")
                     return
                     
-                await query.message.reply_text("You don't have a wallet connected.")
+                await safe_message_reply(query.message, "You don't have a wallet connected.")
                 return
                 
             wallet_info = get_wallet_info(user_wallet)
@@ -335,7 +357,7 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     logger.error("No message in callback query for wallet_seed")
                     return
                     
-                await query.message.reply_text("Could not retrieve wallet details.")
+                await safe_message_reply(query.message, "Could not retrieve wallet details.")
                 return
                 
             mnemonic = wallet_info.get("mnemonic", "Not available")
@@ -344,7 +366,8 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 logger.error("No message in callback query for wallet_seed")
                 return
                 
-            await query.message.reply_text(
+            await safe_message_reply(
+                query.message,
                 "*Your Recovery Seed Phrase*\n\n"
                 f"`{mnemonic}`\n\n"
                 "This seed phrase gives complete access to your wallet. Keep it safe!\n\n"
@@ -363,7 +386,7 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     logger.error("No message in callback query for wallet_export")
                     return
                     
-                await query.message.reply_text("You don't have a wallet connected.")
+                await safe_message_reply(query.message, "You don't have a wallet connected.")
                 return
                 
             wallet_info = get_wallet_info(user_wallet)
@@ -372,7 +395,7 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     logger.error("No message in callback query for wallet_export")
                     return
                     
-                await query.message.reply_text("Could not retrieve wallet details.")
+                await safe_message_reply(query.message, "Could not retrieve wallet details.")
                 return
                 
             private_key = wallet_info.get("private_key", "Not available")
@@ -381,7 +404,8 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 logger.error("No message in callback query for wallet_export")
                 return
                 
-            await query.message.reply_text(
+            await safe_message_reply(
+                query.message,
                 "*Your Private Key*\n\n"
                 f"`{private_key}`\n\n"
                 "You can use this private key to import your wallet into other Solana wallets.\n"
@@ -459,7 +483,8 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             elif option == "transactions":
                 confirmation_text = "You will now receive transaction notifications only."
                 
-            await query.edit_message_text(
+            await safe_edit_message_text(
+                query,
                 f"*Notification Settings Updated*\n\n{confirmation_text}",
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup([
@@ -474,7 +499,8 @@ async def wallet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Try to respond even in case of error
         try:
             if update.callback_query and update.callback_query.message:
-                await update.callback_query.message.reply_text(
+                await safe_message_reply(
+                    update.callback_query.message,
                     "Sorry, an error occurred processing your request. Please try again.",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back to Menu", callback_data="start")]])
                 )
@@ -493,7 +519,8 @@ async def handle_wallet_creation(query, user_id: int):
         return
         
     # First, tell the user we're creating a wallet
-    await query.edit_message_text(
+    await safe_edit_message_text(
+        query,
         "Creating a new Solana wallet for you...\n"
         "This will take a few seconds.",
         reply_markup=None
@@ -503,7 +530,8 @@ async def handle_wallet_creation(query, user_id: int):
     success, wallet_address, wallet_info = create_wallet_for_user(user_id)
     
     if not success or not wallet_address:
-        await query.message.reply_text(
+        await safe_message_reply(
+            query.message,
             "There was an error creating your wallet. Please try again later.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back to Menu", callback_data="start")]])
         )
@@ -516,7 +544,8 @@ async def handle_wallet_creation(query, user_id: int):
         "I'll get you some SOL from the Devnet faucet to get started..."
     )
     
-    await query.message.reply_text(
+    await safe_message_reply(
+        query.message,
         reply_text,
         parse_mode="Markdown",
         reply_markup=None
