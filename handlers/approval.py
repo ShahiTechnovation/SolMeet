@@ -3,22 +3,26 @@ Approval handlers for join requests in the SolMeet bot.
 """
 
 import logging
-from typing import Optional, Dict, Any
+import os
+from typing import Optional, Tuple, Dict, Any
+from pathlib import Path
 
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from utils.join_requests import (
     add_join_request,
     approve_join_request,
     decline_join_request,
-    get_request_status,
+    format_requests_list,
     get_event_organizer_id,
     get_event_requests,
-    format_request_name
+    get_request_status,
+    format_request_name,
 )
-from utils.here_wallet import get_wallet_by_user_id
-from utils.solana import format_wallet_address
+from utils.participants import add_event_participant, count_event_participants
+from utils.solana import join_event_onchain
+from utils.qr import generate_join_qr
 
 logger = logging.getLogger(__name__)
 
@@ -48,125 +52,81 @@ async def send_join_request(
     Returns:
         Success status
     """
-    # Add the join request
-    success = add_join_request(
-        event_id=event_id,
-        wallet_address=user_wallet,
-        user_id=user_id,
-        username=username,
-        first_name=first_name,
-        last_name=last_name
-    )
-    
-    if not success:
-        # Check if the user already has a pending request
-        status = get_request_status(event_id, user_wallet)
+    try:
+        # Check if the user has already sent a request for this event
+        request_status = get_request_status(event_id, user_wallet)
         
-        if status == "pending":
-            message = (
-                f"You already have a pending request to join event {event_id}.\n\n"
-                "Please wait for the organizer to approve your request."
-            )
-            if update.callback_query:
-                await update.callback_query.edit_message_text(
-                    message,
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Back to Menu", callback_data="start")]
-                    ])
-                )
-            elif update.message:
+        if request_status == "approved":
+            if update.message:
                 await update.message.reply_text(
-                    message,
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Back to Menu", callback_data="start")]
-                    ])
+                    f"✅ You've already been approved for event {event_id}!"
+                )
+            return True
+            
+        if request_status == "pending":
+            if update.message:
+                await update.message.reply_text(
+                    f"⌛ Your request to join event {event_id} is still pending approval."
+                )
+            return True
+            
+        if request_status == "declined":
+            if update.message:
+                await update.message.reply_text(
+                    f"❌ Your request to join event {event_id} was declined by the organizer."
                 )
             return False
         
-        elif status == "approved":
-            message = (
-                f"You are already a participant of event {event_id}."
-            )
-            if update.callback_query:
-                await update.callback_query.edit_message_text(
-                    message,
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("My Events", callback_data="event_my")],
-                        [InlineKeyboardButton("Back to Menu", callback_data="start")]
-                    ])
+        # Add the join request
+        added = add_join_request(
+            event_id=event_id,
+            wallet_address=user_wallet,
+            user_id=user_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name
+        )
+        
+        if added:
+            # Get the event organizer's user ID
+            organizer_id = get_event_organizer_id(event_id)
+            
+            if organizer_id:
+                # Notify the organizer
+                await notify_organizer_of_request(
+                    context=context,
+                    event_id=event_id,
+                    requester_wallet=user_wallet,
+                    requester_id=user_id,
+                    organizer_id=organizer_id,
+                    username=username,
+                    first_name=first_name,
+                    last_name=last_name
                 )
-            elif update.message:
+                
+                return True
+            else:
+                logger.error(f"Could not find organizer for event {event_id}")
+                if update.message:
+                    await update.message.reply_text(
+                        f"❌ Could not find the organizer for event {event_id}. Please try again later."
+                    )
+                return False
+        else:
+            logger.error(f"Could not add join request for event {event_id}")
+            if update.message:
                 await update.message.reply_text(
-                    message,
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("My Events", callback_data="event_my")],
-                        [InlineKeyboardButton("Back to Menu", callback_data="start")]
-                    ])
+                    f"❌ There was an error sending your join request. Please try again later."
                 )
             return False
             
-        # Other unknown error
-        message = (
-            f"There was an error sending your join request for event {event_id}."
-        )
-        if update.callback_query:
-            await update.callback_query.edit_message_text(
-                message,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Try Again", callback_data="event_join")],
-                    [InlineKeyboardButton("Back to Menu", callback_data="start")]
-                ])
-            )
-        elif update.message:
+    except Exception as e:
+        logger.error(f"Error sending join request: {e}")
+        if update.message:
             await update.message.reply_text(
-                message,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Try Again", callback_data="event_join")],
-                    [InlineKeyboardButton("Back to Menu", callback_data="start")]
-                ])
+                f"❌ Error sending join request: {str(e)}"
             )
         return False
-    
-    # Request added successfully, now notify the organizer
-    organizer_id = get_event_organizer_id(event_id)
-    
-    if organizer_id:
-        # Don't notify the organizer if it's the same person
-        if organizer_id != user_id:
-            # Send notification to organizer
-            await notify_organizer_of_request(
-                context=context,
-                event_id=event_id,
-                requester_wallet=user_wallet,
-                requester_id=user_id,
-                organizer_id=organizer_id,
-                username=username,
-                first_name=first_name,
-                last_name=last_name
-            )
-    
-    # Send confirmation to user
-    message = (
-        f"Your request to join event {event_id} has been sent to the organizer.\n\n"
-        "You will be notified when your request is approved or declined."
-    )
-    if update.callback_query:
-        await update.callback_query.edit_message_text(
-            message,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Back to Menu", callback_data="start")]
-            ])
-        )
-    elif update.message:
-        await update.message.reply_text(
-            message,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Back to Menu", callback_data="start")]
-            ])
-        )
-    
-    return True
-
 
 async def notify_organizer_of_request(
     context: ContextTypes.DEFAULT_TYPE,
@@ -191,229 +151,279 @@ async def notify_organizer_of_request(
         first_name: The requester's first name
         last_name: The requester's last name
     """
-    # Format the requester's name
-    if username:
-        display_name = f"@{username}"
-    elif first_name:
-        if last_name:
-            display_name = f"{first_name} {last_name}"
-        else:
-            display_name = first_name
-    else:
-        display_name = f"User {requester_id}"
-    
-    # Create the notification message
-    notification = (
-        f"🔔 *New Join Request for Event {event_id}*\n\n"
-        f"User: {display_name}\n"
-        f"Wallet: `{format_wallet_address(requester_wallet)}`\n\n"
-        "Would you like to approve or decline this request?"
-    )
-    
-    # Create inline keyboard with approve/decline buttons
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Approve", callback_data=f"approve_{event_id}_{requester_wallet}"),
-            InlineKeyboardButton("❌ Decline", callback_data=f"decline_{event_id}_{requester_wallet}")
-        ],
-        [InlineKeyboardButton("View All Requests", callback_data=f"requests_{event_id}")]
-    ])
-    
     try:
+        # Format the user's name for display
+        if username:
+            display_name = f"@{username}"
+        elif first_name:
+            display_name = first_name
+            if last_name:
+                display_name += f" {last_name}"
+        else:
+            display_name = f"User {requester_id}"
+        
+        # Create a keyboard with approval/decline buttons
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Approve", callback_data=f"approve_{event_id}_{requester_wallet}"),
+                InlineKeyboardButton("❌ Decline", callback_data=f"decline_{event_id}_{requester_wallet}")
+            ],
+            [
+                InlineKeyboardButton("👥 View All Requests", callback_data=f"requests_{event_id}")
+            ]
+        ])
+        
         # Send the notification to the organizer
         await context.bot.send_message(
             chat_id=organizer_id,
-            text=notification,
+            text=(
+                f"🔔 *New Join Request*\n\n"
+                f"Event: `{event_id}`\n"
+                f"From: {display_name}\n"
+                f"Wallet: `{requester_wallet}`\n\n"
+                f"Would you like to approve this request?"
+            ),
             parse_mode="Markdown",
             reply_markup=keyboard
         )
-        logger.info(f"Sent join request notification to organizer {organizer_id} for event {event_id}")
     except Exception as e:
-        logger.error(f"Error sending join request notification: {e}")
-
+        logger.error(f"Error notifying organizer of request: {e}")
 
 async def approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handle approval-related callback queries.
     """
-    if not update.callback_query:
-        logger.error("No callback query in update for approval_callback")
-        return
-        
     query = update.callback_query
     
+    if not query:
+        return
+        
+    # Acknowledge the callback to stop the loading indicator
+    await query.answer()
+    
+    user_id = update.effective_user.id if update.effective_user else None
+    if not user_id:
+        logger.error("No user ID in approval callback")
+        return
+        
+    callback_data = query.data
+    if not callback_data:
+        logger.error("No callback data in approval callback")
+        return
+        
+    # Extract the action and parameters
+    parts = callback_data.split('_')
+    action = parts[0]
+    
+    if action == "approve" and len(parts) >= 3:
+        event_id = parts[1]
+        wallet_address = '_'.join(parts[2:])  # In case wallet contains underscores
+        await handle_approval(query, user_id, event_id, wallet_address, approved=True)
+    elif action == "decline" and len(parts) >= 3:
+        event_id = parts[1]
+        wallet_address = '_'.join(parts[2:])  # In case wallet contains underscores
+        await handle_approval(query, user_id, event_id, wallet_address, approved=False)
+    elif action == "requests" and len(parts) >= 2:
+        event_id = parts[1]
+        await handle_requests_list(query, user_id, event_id)
+    else:
+        logger.error(f"Unknown approval action: {action}")
+        await query.edit_message_text(
+            "❌ There was an error processing your request. Please try again."
+        )
+
+async def handle_approval(
+    query,
+    user_id: int,
+    event_id: str,
+    wallet_address: str,
+    approved: bool
+) -> None:
+    """
+    Handle the approval or decline of a join request.
+    
+    Args:
+        query: The callback query
+        user_id: The user ID of the organizer
+        event_id: The event ID
+        wallet_address: The wallet address of the requester
+        approved: Whether the request was approved
+    """
+    # Get the context from the query
+    context = query._context
     try:
-        await query.answer()
+        # Check if the user is the event organizer
+        organizer_id = get_event_organizer_id(event_id)
         
-        if not query.data:
-            logger.error("No data in callback query for approval_callback")
-            return
-            
-        if not query.from_user:
-            logger.error("No user in callback query for approval_callback")
-            return
-            
-        user_id = query.from_user.id
-        
-        # Parse the callback data
-        parts = query.data.split("_")
-        action = parts[0]
-        
-        if action == "approve" and len(parts) >= 3:
-            # Format: approve_EVENT-ID_WALLET-ADDRESS
-            event_id = parts[1]
-            wallet_address = "_".join(parts[2:])  # In case the wallet has underscores
-            
-            # Process the approval
-            success = approve_join_request(
-                event_id=event_id,
-                wallet_address=wallet_address,
-                approved_by_user_id=user_id
-            )
-            
-            if success:
-                # Notify the requester
-                requester_id = None
-                requests = get_event_requests(event_id)
-                
-                if wallet_address in requests:
-                    requester_info = requests[wallet_address]
-                    requester_id = requester_info.get("user_id")
-                
-                if requester_id:
-                    try:
-                        await context.bot.send_message(
-                            chat_id=requester_id,
-                            text=(
-                                f"🎉 Your request to join event {event_id} has been approved!\n\n"
-                                "You are now a participant of this event."
-                            ),
-                            reply_markup=InlineKeyboardMarkup([
-                                [InlineKeyboardButton("View My Events", callback_data="event_my")],
-                                [InlineKeyboardButton("Back to Menu", callback_data="start")]
-                            ])
-                        )
-                    except Exception as e:
-                        logger.error(f"Error notifying requester of approval: {e}")
-                
-                # Confirm to organizer
-                await query.edit_message_text(
-                    f"✅ You have approved the join request for event {event_id}.\n\n"
-                    f"The user with wallet {format_wallet_address(wallet_address)} has been added as a participant.",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("View All Requests", callback_data=f"requests_{event_id}")],
-                        [InlineKeyboardButton("Back to Menu", callback_data="start")]
-                    ])
-                )
-            else:
-                await query.edit_message_text(
-                    f"❌ There was an error approving the join request for event {event_id}.\n\n"
-                    "Please try again later.",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Back to Menu", callback_data="start")]
-                    ])
-                )
-                
-        elif action == "decline" and len(parts) >= 3:
-            # Format: decline_EVENT-ID_WALLET-ADDRESS
-            event_id = parts[1]
-            wallet_address = "_".join(parts[2:])  # In case the wallet has underscores
-            
-            # Process the decline
-            success = decline_join_request(
-                event_id=event_id,
-                wallet_address=wallet_address,
-                declined_by_user_id=user_id
-            )
-            
-            if success:
-                # Notify the requester
-                requester_id = None
-                requests = get_event_requests(event_id)
-                
-                if wallet_address in requests:
-                    requester_info = requests[wallet_address]
-                    requester_id = requester_info.get("user_id")
-                
-                if requester_id:
-                    try:
-                        await context.bot.send_message(
-                            chat_id=requester_id,
-                            text=(
-                                f"Your request to join event {event_id} has been declined by the organizer.\n\n"
-                                "You can try joining a different event or create your own."
-                            ),
-                            reply_markup=InlineKeyboardMarkup([
-                                [InlineKeyboardButton("Find Events", callback_data="event_list")],
-                                [InlineKeyboardButton("Create Event", callback_data="event_create")],
-                                [InlineKeyboardButton("Back to Menu", callback_data="start")]
-                            ])
-                        )
-                    except Exception as e:
-                        logger.error(f"Error notifying requester of decline: {e}")
-                
-                # Confirm to organizer
-                await query.edit_message_text(
-                    f"❌ You have declined the join request for event {event_id}.\n\n"
-                    f"The user with wallet {format_wallet_address(wallet_address)} has been notified.",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("View All Requests", callback_data=f"requests_{event_id}")],
-                        [InlineKeyboardButton("Back to Menu", callback_data="start")]
-                    ])
-                )
-            else:
-                await query.edit_message_text(
-                    f"❌ There was an error declining the join request for event {event_id}.\n\n"
-                    "Please try again later.",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Back to Menu", callback_data="start")]
-                    ])
-                )
-                
-        elif action == "requests" and len(parts) >= 2:
-            # Format: requests_EVENT-ID
-            event_id = parts[1]
-            
-            # Get all pending requests for this event
-            requests = get_event_requests(event_id)
-            
-            if not requests:
-                await query.edit_message_text(
-                    f"There are no pending join requests for event {event_id}.",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Back to Events", callback_data="event_my")],
-                        [InlineKeyboardButton("Back to Menu", callback_data="start")]
-                    ])
-                )
-                return
-            
-            # Create a list of requests with approve/decline buttons for each
-            message = f"Pending Join Requests for Event {event_id}:\n\n"
-            
-            keyboard = []
-            for wallet, info in requests.items():
-                name = format_request_name(info)
-                message += f"• {name} ({format_wallet_address(wallet)})\n"
-                
-                # Add approve/decline buttons for this request
-                keyboard.append([
-                    InlineKeyboardButton(f"✅ Approve {name}", callback_data=f"approve_{event_id}_{wallet}"),
-                    InlineKeyboardButton("❌ Decline", callback_data=f"decline_{event_id}_{wallet}")
-                ])
-            
-            keyboard.append([InlineKeyboardButton("Back to Menu", callback_data="start")])
-            
+        if organizer_id != user_id:
             await query.edit_message_text(
-                message,
-                reply_markup=InlineKeyboardMarkup(keyboard)
+                "❌ You don't have permission to perform this action."
             )
-    except Exception as e:
-        logger.error(f"Error in approval callback: {e}")
-        if update.callback_query and update.callback_query.message:
-            try:
-                await update.callback_query.message.reply_text(
-                    "An error occurred while processing your request. Please try again later.",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back to Menu", callback_data="start")]])
+            return
+            
+        # Get request info before processing
+        requests = get_event_requests(event_id)
+        request_info = requests.get(wallet_address)
+        
+        if not request_info:
+            await query.edit_message_text(
+                f"❌ Could not find request for wallet {wallet_address} in event {event_id}."
+            )
+            return
+            
+        requester_id = request_info.get("user_id")
+        
+        if approved:
+            # Approve the request
+            success = approve_join_request(event_id, wallet_address, user_id)
+            
+            if success:
+                # Complete the join process
+                
+                # Join the event on-chain
+                tx_signature = await join_event_onchain(wallet_address, event_id)
+                
+                # Add the user to the event participants
+                requester_username = request_info.get("username")
+                requester_first_name = request_info.get("first_name")
+                requester_last_name = request_info.get("last_name")
+                
+                add_success = add_event_participant(
+                    event_id, wallet_address, requester_id, 
+                    requester_username, requester_first_name, requester_last_name
                 )
-            except Exception:
-                pass
+                
+                if add_success:
+                    # Get the current participant count
+                    participant_count = count_event_participants(event_id)
+                    
+                    # Tell the organizer the request was approved
+                    requester_name = format_request_name(request_info)
+                    
+                    await query.edit_message_text(
+                        f"✅ You approved {requester_name}'s request to join event {event_id}.\n\n"
+                        f"They are now participant #{participant_count}.",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("View All Requests", callback_data=f"requests_{event_id}")]
+                        ])
+                    )
+                    
+                    # Notify the requester that they've been approved
+                    if requester_id:
+                        # Generate QR code for the event
+                        qr_image_path = generate_join_qr(event_id)
+                        
+                        # Send message to the requester
+                        await context.bot.send_message(
+                            chat_id=requester_id,
+                            text=(
+                                f"🎉 *Your request to join event {event_id} has been approved!*\n\n"
+                                f"You are participant #{participant_count}\n\n"
+                                f"[View Transaction on Explorer](https://explorer.solana.com/tx/{tx_signature}?cluster=devnet)"
+                            ),
+                            parse_mode="Markdown",
+                            disable_web_page_preview=True
+                        )
+                        
+                        # Send the event QR code if available
+                        if qr_image_path and os.path.exists(qr_image_path):
+                            with open(qr_image_path, 'rb') as photo:
+                                await context.bot.send_photo(
+                                    chat_id=requester_id,
+                                    photo=photo,
+                                    caption=f"Here's your QR code for event {event_id}. Share this with others!"
+                                )
+                else:
+                    await query.edit_message_text(
+                        f"❌ There was an error adding {format_request_name(request_info)} to the event."
+                    )
+            else:
+                await query.edit_message_text(
+                    f"❌ There was an error approving {format_request_name(request_info)}'s request."
+                )
+        else:
+            # Decline the request
+            success = decline_join_request(event_id, wallet_address, user_id)
+            
+            if success:
+                # Tell the organizer the request was declined
+                await query.edit_message_text(
+                    f"❌ You declined {format_request_name(request_info)}'s request to join event {event_id}.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("View All Requests", callback_data=f"requests_{event_id}")]
+                    ])
+                )
+                
+                # Notify the requester that they've been declined
+                if requester_id:
+                    await context.bot.send_message(
+                        chat_id=requester_id,
+                        text=f"❌ Your request to join event {event_id} was declined by the organizer."
+                    )
+            else:
+                await query.edit_message_text(
+                    f"❌ There was an error declining {format_request_name(request_info)}'s request."
+                )
+                
+    except Exception as e:
+        logger.error(f"Error handling approval: {e}")
+        await query.edit_message_text(
+            f"❌ An error occurred while processing the request: {str(e)}"
+        )
+
+async def handle_requests_list(
+    query,
+    user_id: int,
+    event_id: str
+) -> None:
+    """
+    Handle showing the list of join requests for an event.
+    
+    Args:
+        query: The callback query
+        user_id: The user ID of the requester
+        event_id: The event ID
+    """
+    # Get the context from the query
+    context = query._context
+    try:
+        # Check if the user is the event organizer
+        organizer_id = get_event_organizer_id(event_id)
+        
+        if organizer_id != user_id:
+            await query.edit_message_text(
+                "❌ You don't have permission to view requests for this event."
+            )
+            return
+            
+        # Format the list of requests
+        requests_text = format_requests_list(event_id)
+        
+        # Get the requests
+        requests = get_event_requests(event_id)
+        
+        # Create buttons for each request
+        buttons = []
+        for wallet, request_info in requests.items():
+            if request_info.get("status") == "pending":
+                name = format_request_name(request_info)
+                buttons.append([
+                    InlineKeyboardButton(f"✅ {name}", callback_data=f"approve_{event_id}_{wallet}"),
+                    InlineKeyboardButton(f"❌ {name}", callback_data=f"decline_{event_id}_{wallet}")
+                ])
+        
+        # Add a back button
+        buttons.append([InlineKeyboardButton("Back to Menu", callback_data="start")])
+        
+        # Show the requests
+        await query.edit_message_text(
+            f"👥 *Join Requests for Event {event_id}*\n\n{requests_text}",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+            
+    except Exception as e:
+        logger.error(f"Error handling requests list: {e}")
+        await query.edit_message_text(
+            f"❌ An error occurred while retrieving requests: {str(e)}"
+        )
