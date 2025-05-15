@@ -1,0 +1,14 @@
+{
+  "id": "C08989ED",
+  "name": "qaER",
+  "description": "q",
+  "venue": "QWRYJ",
+  "date": "2023-12-31T15:00:00",
+  "max_claims": 234,
+  "creator": "HAjUcPq4V1Q3yGskv13L59ooYt9vvAC5GTVUwJqfrazS",
+  "creator_id": 6904392242,
+  "claims": [],
+  "created_at": 1747299392,
+  "tx_signature": "simulated_tx_createEvent_24865",
+  "is_onchain": true
+}
