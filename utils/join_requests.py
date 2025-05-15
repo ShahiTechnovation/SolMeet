@@ -3,11 +3,10 @@ Join request management utilities for the SolMeet bot.
 Handles tracking and processing of event join requests.
 """
 
-import os
 import json
 import logging
 import time
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -223,15 +222,15 @@ def decline_join_request(
         logger.error(f"Error declining join request: {e}")
         return False
 
-def get_event_organizer_id(event_id: str) -> Optional[int]:
+def get_event_by_id(event_id: str) -> Optional[Dict[str, Any]]:
     """
-    Get the user ID of the event organizer.
+    Get the event details by ID.
     
     Args:
         event_id: The event ID
         
     Returns:
-        The user ID of the event organizer, or None if not found
+        The event data as a dictionary, or None if not found
     """
     try:
         # Check if the event exists
@@ -245,6 +244,28 @@ def get_event_organizer_id(event_id: str) -> Optional[int]:
         # Load the event data
         with open(event_file, "r") as f:
             event_data = json.load(f)
+            
+        return event_data
+    except Exception as e:
+        logger.error(f"Error loading event data: {e}")
+        return None
+
+
+def get_event_organizer_id(event_id: str) -> Optional[int]:
+    """
+    Get the user ID of the event organizer.
+    
+    Args:
+        event_id: The event ID
+        
+    Returns:
+        The user ID of the event organizer, or None if not found
+    """
+    try:
+        # Get the event data
+        event_data = get_event_by_id(event_id)
+        if not event_data:
+            return None
             
         # Get the organizer ID
         organizer_id = event_data.get("creator_id")

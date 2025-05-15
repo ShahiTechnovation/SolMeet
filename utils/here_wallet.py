@@ -5,7 +5,6 @@ Handles wallet connection, linking, and transaction signing.
 
 import os
 import logging
-import json
 import random
 import string
 from typing import Dict, Optional, Any, Tuple
@@ -47,8 +46,23 @@ def get_user_wallets() -> Dict[str, str]:
     """
     Get all available wallets that can be linked to users.
     Returns a dictionary of wallet addresses to readable names.
+    
+    This is a security-sensitive function that should only return wallets
+    that aren't already linked to other users.
     """
-    return list_user_wallets()
+    # Get all wallets from files
+    all_wallets = list_user_wallets()
+    
+    # Get list of wallets that are already linked to users
+    linked_wallets = set(connected_wallets.values())
+    
+    # Filter to only show unlinked wallets
+    available_wallets = {}
+    for address, name in all_wallets.items():
+        if address not in linked_wallets:
+            available_wallets[address] = name
+            
+    return available_wallets
 
 
 def create_wallet_for_user(user_id: int) -> Tuple[bool, Optional[str], Optional[Dict]]:

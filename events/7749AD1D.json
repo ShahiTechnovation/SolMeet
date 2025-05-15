@@ -1,0 +1,12 @@
+{
+  "id": "7749AD1D",
+  "name": "hei",
+  "description": "sd",
+  "venue": "werh",
+  "date": "2023-12-31T15:00:00",
+  "max_claims": 2,
+  "creator": "HAjUcPq4V1Q3yGskv13L59ooYt9vvAC5GTVUwJqfrazS",
+  "claims": [],
+  "created_at": 1747298876,
+  "tx_signature": "simulated_tx_createEvent_33893"
+}

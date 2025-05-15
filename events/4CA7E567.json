@@ -1,0 +1,12 @@
+{
+  "id": "4CA7E567",
+  "name": "rthjk",
+  "description": "w",
+  "venue": "dfgh",
+  "date": "2023-12-31T15:00:00",
+  "max_claims": 3,
+  "creator": "HAjUcPq4V1Q3yGskv13L59ooYt9vvAC5GTVUwJqfrazS",
+  "claims": [],
+  "created_at": 1747297838,
+  "tx_signature": "simulated_tx_createEvent_79930"
+}

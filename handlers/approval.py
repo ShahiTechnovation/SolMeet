@@ -4,6 +4,7 @@ Approval handlers for join requests in the SolMeet bot.
 
 import logging
 import os
+import asyncio
 from typing import Optional, Tuple, Dict, Any
 from pathlib import Path
 
@@ -15,13 +16,14 @@ from utils.join_requests import (
     approve_join_request,
     decline_join_request,
     format_requests_list,
+    get_event_by_id,
     get_event_organizer_id,
     get_event_requests,
     get_request_status,
     format_request_name,
 )
 from utils.participants import add_event_participant, count_event_participants
-from utils.solana import join_event_onchain
+from utils.solana import join_event_onchain, format_wallet_address
 from utils.qr import generate_join_qr
 
 logger = logging.getLogger(__name__)
@@ -139,7 +141,7 @@ async def notify_organizer_of_request(
     last_name: Optional[str] = None
 ) -> None:
     """
-    Notify the event organizer of a new join request.
+    Notify the event organizer of a new join request with improved one-click approval UI.
     
     Args:
         context: The context object
@@ -151,6 +153,7 @@ async def notify_organizer_of_request(
         first_name: The requester's first name
         last_name: The requester's last name
     """
+
     try:
         # Format the user's name for display
         if username:
@@ -162,7 +165,24 @@ async def notify_organizer_of_request(
         else:
             display_name = f"User {requester_id}"
         
-        # Create a keyboard with approval/decline buttons
+        # Get event details from join requests system
+        
+        event = get_event_by_id(event_id)
+        if not event:
+            logger.warning(f"Could not find event {event_id} details for notification")
+            event_name = "Unnamed Event"
+            event_date = "Date not set"
+            event_venue = "Venue not set"
+        else:
+            event_name = event.get("name", "Unnamed Event")
+            event_date = event.get("date", "Date not set")
+            event_venue = event.get("venue", "Venue not set")
+        
+        # Get participant count information
+        participant_count = count_event_participants(event_id)
+        max_participants = event.get("max_participants", "∞") if event else "∞"
+        
+        # Create an improved keyboard with approval/decline buttons
         keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("✅ Approve", callback_data=f"approve_{event_id}_{requester_wallet}"),
@@ -173,18 +193,36 @@ async def notify_organizer_of_request(
             ]
         ])
         
-        # Send the notification to the organizer
+        # Format wallet address for display
+        from utils.solana import format_wallet_address
+        short_wallet = format_wallet_address(requester_wallet)
+        
+        # Send the enhanced notification to the organizer
         await context.bot.send_message(
             chat_id=organizer_id,
             text=(
                 f"🔔 *New Join Request*\n\n"
-                f"Event: `{event_id}`\n"
-                f"From: {display_name}\n"
-                f"Wallet: `{requester_wallet}`\n\n"
+                f"*{display_name}* wants to join your event:\n"
+                f"*{event_name}*\n\n"
+                f"📅 {event_date}\n"
+                f"📍 {event_venue}\n"
+                f"👥 Participants: {participant_count}/{max_participants}\n\n"
+                f"Wallet: `{short_wallet}`\n\n"
                 f"Would you like to approve this request?"
             ),
             parse_mode="Markdown",
             reply_markup=keyboard
+        )
+        
+        # Also notify the requester that their request is pending
+        await context.bot.send_message(
+            chat_id=requester_id,
+            text=(
+                f"🕒 *Join Request Sent*\n\n"
+                f"Your request to join *{event_name}* has been sent to the organizer.\n"
+                f"You'll be notified when they approve or decline your request."
+            ),
+            parse_mode="Markdown"
         )
     except Exception as e:
         logger.error(f"Error notifying organizer of request: {e}")
@@ -280,16 +318,47 @@ async def handle_approval(
             if success:
                 # Complete the join process
                 
-                # Join the event on-chain
-                tx_signature = await join_event_onchain(wallet_address, event_id)
+                # First, tell the user we're processing
+                await query.answer("Processing on-chain transaction...")
+                await query.edit_message_text(
+                    f"⏳ Processing approval for {format_request_name(request_info)}...\n"
+                    f"Sending transaction to Solana blockchain...",
+                    parse_mode="Markdown"
+                )
                 
-                # Add the user to the event participants
+                # Try to join the event on-chain with timeout handling
+                tx_signature = None
+                tx_success = False
+                try:
+                    # Call blockchain function with timeout
+                    tx_signature = await asyncio.wait_for(
+                        join_event_onchain(wallet_address, event_id),
+                        timeout=10.0  # 10-second timeout for blockchain operations
+                    )
+                    logger.info(f"On-chain join successful: {tx_signature}")
+                    tx_success = True
+                except asyncio.TimeoutError:
+                    logger.error(f"On-chain join timed out for {wallet_address} on event {event_id}")
+                except Exception as e:
+                    logger.error(f"On-chain join failed: {e}")
+                
+                # Add the user to the event participants regardless of blockchain status
                 requester_username = request_info.get("username")
                 requester_first_name = request_info.get("first_name")
                 requester_last_name = request_info.get("last_name")
                 
+                # Make sure requester_id is a valid integer
+                requester_id_int = int(requester_id) if requester_id is not None else None
+                
+                if requester_id_int is None:
+                    logger.error(f"Invalid requester ID for join request: {requester_id}")
+                    await query.edit_message_text(
+                        f"❌ Error processing approval: Invalid requester ID"
+                    )
+                    return
+                
                 add_success = add_event_participant(
-                    event_id, wallet_address, requester_id, 
+                    event_id, wallet_address, requester_id_int, 
                     requester_username, requester_first_name, requester_last_name
                 )
                 
@@ -297,12 +366,15 @@ async def handle_approval(
                     # Get the current participant count
                     participant_count = count_event_participants(event_id)
                     
-                    # Tell the organizer the request was approved
+                    # Tell the organizer the request was approved with blockchain status
                     requester_name = format_request_name(request_info)
+                    blockchain_status = "and recorded on-chain ⛓️" if tx_success else "locally only 📋"
                     
                     await query.edit_message_text(
-                        f"✅ You approved {requester_name}'s request to join event {event_id}.\n\n"
+                        f"✅ *Request Approved*\n\n"
+                        f"You approved {requester_name}'s request to join event {event_id} {blockchain_status}.\n\n"
                         f"They are now participant #{participant_count}.",
+                        parse_mode="Markdown",
                         reply_markup=InlineKeyboardMarkup([
                             [InlineKeyboardButton("View All Requests", callback_data=f"requests_{event_id}")]
                         ])
@@ -314,12 +386,16 @@ async def handle_approval(
                         qr_image_path = generate_join_qr(event_id)
                         
                         # Send message to the requester
+                        # Format messages with blockchain status
+                        on_chain_status = "and recorded on the Solana blockchain ⛓️" if tx_success else "with a local record only 📋"
+                        explorer_link = f"\n\n[View Transaction on Explorer](https://explorer.solana.com/tx/{tx_signature}?cluster=devnet)" if tx_success else ""
+                        
                         await context.bot.send_message(
                             chat_id=requester_id,
                             text=(
-                                f"🎉 *Your request to join event {event_id} has been approved!*\n\n"
-                                f"You are participant #{participant_count}\n\n"
-                                f"[View Transaction on Explorer](https://explorer.solana.com/tx/{tx_signature}?cluster=devnet)"
+                                f"🎉 *Join Request Approved*\n\n"
+                                f"Your request to join event *{event_id}* has been approved {on_chain_status}!\n\n"
+                                f"You are participant #{participant_count}{explorer_link}"
                             ),
                             parse_mode="Markdown",
                             disable_web_page_preview=True

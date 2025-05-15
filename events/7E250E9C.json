@@ -1,0 +1,12 @@
+{
+  "id": "7E250E9C",
+  "name": "Hey",
+  "description": "Ka",
+  "venue": "Helo",
+  "date": "2023-12-31T15:00:00",
+  "max_claims": 6,
+  "creator": "HAjUcPq4V1Q3yGskv13L59ooYt9vvAC5GTVUwJqfrazS",
+  "claims": [],
+  "created_at": 1747297511,
+  "tx_signature": "simulated_tx_createEvent_74603"
+}
